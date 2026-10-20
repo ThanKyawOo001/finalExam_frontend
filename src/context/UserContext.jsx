@@ -5,7 +5,28 @@ import { createContext, useEffect, useRef, useState } from "react";
 // Strip trailing slashes so "https://x.app/" and "https://x.app" both work
 const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
+const TOKEN_KEY = "token";
+
 export const UserContext = createContext();
+
+// The login cookie is the main session. The token copy is only sent as a
+// Bearer header for browsers that block cross-site cookies.
+function getStoredToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // storage unavailable, the cookie still works
+  }
+}
 
 export function UserProvider({ children }) {
   const isInit = useRef(false);
@@ -15,6 +36,7 @@ export function UserProvider({ children }) {
   const [loginErrorMsg, setLoginErrorMsg] = useState("");
 
   function clearUser() {
+    setStoredToken(null);
     setUser(null);
     setIsLoggedIn(false);
   }
@@ -27,6 +49,10 @@ export function UserProvider({ children }) {
       credentials: "include",
       headers: { ...(options.headers || {}) },
     };
+    const token = getStoredToken();
+    if (token) {
+      init.headers["Authorization"] = `Bearer ${token}`;
+    }
     if (options.body !== undefined && typeof options.body !== "string") {
       init.body = JSON.stringify(options.body);
       init.headers["Content-Type"] = "application/json";
@@ -79,7 +105,12 @@ export function UserProvider({ children }) {
       body: { email, password },
     });
     if (result.ok) {
-      return await me();
+      setStoredToken(result.data.token);
+      const ok = await me();
+      if (!ok) {
+        setLoginErrorMsg("Logged in, but the session could not be loaded");
+      }
+      return ok;
     }
     setLoginErrorMsg(result.data.message || "Login failed");
     clearUser();
